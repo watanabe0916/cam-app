@@ -79,7 +79,8 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   } = useCameraStore();
   
   // 【要件1】動的なカメラフォーマット選択
-  // aspectRatio に応じてフォーマット条件を動的に作成
+  // 【重要】videoResolution と photoResolution を 'max' に設定して最高画質を確保
+  // useCameraFormat は複数の条件を評価して、最適なフォーマットを自動選択する
   const format = useCameraFormat(device, [
     {
       videoAspectRatio: aspectRatio === '16:9' ? 16 / 9 : 4 / 3,
@@ -88,6 +89,16 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       photoResolution: 'max',
     },
   ]);
+
+  // デバッグ：実際に選ばれたフォーマットとデバイス情報をログ出力
+  React.useEffect(() => {
+    if (device) {
+      console.log(`📱 Device: ${device.name || device.id} (${isFrontCamera ? 'FRONT' : 'BACK'})`);
+    }
+    if (format) {
+      console.log(`📸 Format selected:`, format);
+    }
+  }, [device, format, isFrontCamera]);
 
   const [isProcessing, setIsProcessing] = React.useState(false);
   // 【重要】カメラプレビューは常に表示（isActive を true に固定）
