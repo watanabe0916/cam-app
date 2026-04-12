@@ -1,11 +1,13 @@
 import { useCameraStore, type AspectRatio, type FlashMode } from '@/store/cameraStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Pressable,
   StyleSheet,
   Text,
@@ -16,17 +18,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Camera,
   useCameraDevice,
-  useCameraPermission
+  useCameraFormat,
+  useCameraPermission,
 } from 'react-native-vision-camera';
 
 const FLASH_MODES: FlashMode[] = ['auto', 'on', 'off'];
 const ASPECT_RATIOS: AspectRatio[] = ['16:9', '4:3', '1:1'];
 
-const FLASH_ICONS: Record<FlashMode, string> = {
+// アスペクト比の表示ラベルマップ（内部値 → 表示値：縦型で表示）
+const ASPECT_RATIO_LABELS: Record<AspectRatio, string> = {
+  '16:9': '9:16',
+  '4:3': '3:4',
+  '1:1': '1:1',
+};
+
+// アスペクト比を数値（幅÷高さ）に変換
+const ASPECT_RATIO_VALUES: Record<AspectRatio, number> = {
+  '16:9': 9 / 16,
+  '4:3': 3 / 4,
+  '1:1': 1,
+};
+
+const FLASH_ICONS = {
   auto: 'flash-auto',
   on: 'flash',
   off: 'flash-off',
-};
+} as const;
 
 export interface CameraScreenProps {
   onPhotoCapture?: (photoPath: string) => void;
@@ -39,7 +56,11 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
 }) => {
   const router = useRouter();
   const cameraRef = useRef<Camera>(null);
-  const device = useCameraDevice('back');
+  // カメラの選択状態を管理（フロント/バック）
+  const [isFrontCamera, setIsFrontCamera] = React.useState(false);
+  // 選択されたカメラデバイスを取得
+  const device = useCameraDevice(isFrontCamera ? 'front' : 'back');
+  
   const { hasPermission: cameraPermission, requestPermission: requestCameraPermission } =
     useCameraPermission();
 
@@ -56,14 +77,33 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     aspectRatio,
     setAspectRatio,
   } = useCameraStore();
+  
+  // アスペクト比に対応するカメラフォーマットを取得
+  const format = useCameraFormat(device, [
+    { videoResolution: 'max' },
+  ]);
 
   const [isProcessing, setIsProcessing] = React.useState(false);
+  // 【エコ設定】アプリのバックグラウンド状態を管理
+  const [isAppForeground, setIsAppForeground] = React.useState(true);
+  // 【エコ設定】カメラ画面のフォーカス状態を取得
+  const isFocused = useIsFocused();
+  // 【エコ設定】カメラ有効判定：フォアグラウンド かつ フォーカス中
+  const isCameraActive = isAppForeground && isFocused;
 
   const handleFlashToggle = useCallback(() => {
+    // フロントカメラではフラッシュトグルをスキップ
+    if (isFrontCamera) {
+      return;
+    }
     const currentIndex = FLASH_MODES.indexOf(flashMode);
     const nextIndex = (currentIndex + 1) % FLASH_MODES.length;
     setFlashMode(FLASH_MODES[nextIndex]);
-  }, [flashMode, setFlashMode]);
+  }, [flashMode, setFlashMode, isFrontCamera]);
+
+  const handleCameraToggle = useCallback(() => {
+    setIsFrontCamera(!isFrontCamera);
+  }, [isFrontCamera]);
 
   const handleAspectRatioChange = useCallback((ratio: AspectRatio) => {
     setAspectRatio(ratio);
@@ -91,6 +131,17 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       requestMediaLibraryPermission();
     }
   }, [mediaLibraryPermission, requestMediaLibraryPermission]);
+
+  // 【エコ設定】アプリのバックグラウンド状態をリッスン
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      setIsAppForeground(state === 'active');
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   // Vision Camera v4では autofocusはデフォルトで有効です
 
@@ -218,27 +269,43 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
 
   return (
     <View style={[styles.container, { backgroundColor: '#000' }]}>
-      <Camera
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive={true}
-        photo={isPhotoMode}
-        video={true}
-        audio={!isPhotoMode && isAudioEnabled}
-      />
+      {/* 【アスペクト比制御】指定されたアスペクト比でカメラプレビューをクロップ */}
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflow: 'hidden',
+            aspectRatio: ASPECT_RATIO_VALUES[aspectRatio],
+          },
+        ]}
+      >
+        {/* 【エコ設定】カメラはフォアグラウンド＆フォーカス時のみ有効化 */}
+        <Camera
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          device={device}
+          isActive={isCameraActive}
+          photo={isPhotoMode}
+          video={true}
+          audio={!isPhotoMode && isAudioEnabled}
+          format={format}
+        />
+      </View>
 
       <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
         <View style={styles.headerContainer}>
           <TouchableOpacity
-            style={styles.headerButton}
+            style={[styles.headerButton, isFrontCamera && {opacity: 0.3}]}
             onPress={handleFlashToggle}
+            disabled={isFrontCamera}
             activeOpacity={0.7}
           >
             <MaterialCommunityIcons
-              name={FLASH_ICONS[flashMode] as any}
+              name={isFrontCamera ? FLASH_ICONS.off : FLASH_ICONS[flashMode]}
               size={28}
-              color="#fff"
+              color={isFrontCamera ? '#999' : '#fff'}
             />
           </TouchableOpacity>
 
@@ -253,22 +320,28 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
                 onPress={() => handleAspectRatioChange(ratio)}
                 activeOpacity={0.7}
               >
-                <MaterialCommunityIcons
-                  name={
-                    ratio === '16:9'
-                      ? 'aspect-ratio'
-                      : ratio === '4:3'
-                        ? 'rectangle'
-                        : 'circle-medium'
-                  }
-                  size={18}
-                  color={aspectRatio === ratio ? '#007AFF' : '#fff'}
-                />
+                <Text style={[
+                  styles.aspectRatioText,
+                  aspectRatio === ratio && styles.aspectRatioTextActive,
+                ]}>
+                  {ASPECT_RATIO_LABELS[ratio]}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          </View>
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={handleCameraToggle}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons
+              name="camera-flip"
+              size={28}
+              color="#fff"
+            />
+          </TouchableOpacity>
+        </View>
 
         <View style={{ flex: 1 }} />
 
@@ -370,11 +443,11 @@ const styles = StyleSheet.create({
   },
   aspectRatioContainer: { flexDirection: 'row', gap: 8 },
   aspectRatioButton: {
-    width: 40,
+    width: 50,
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
@@ -382,6 +455,14 @@ const styles = StyleSheet.create({
   aspectRatioButtonActive: {
     backgroundColor: 'rgba(0, 122, 255, 0.3)',
     borderColor: '#007AFF',
+  },
+  aspectRatioText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  aspectRatioTextActive: {
+    color: '#007AFF',
   },
   footerContainer: {
     gap: 6,
