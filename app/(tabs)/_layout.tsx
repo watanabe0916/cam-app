@@ -6,6 +6,10 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
+export const unstable_settings = {
+  anchor: '(tabs)',
+};
+
 export default function TabLayout() {
   const colorScheme = useColorScheme();
 
@@ -19,8 +23,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: 'Camera',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="camera.fill" color={color} />,
+          headerShown: false,
         }}
       />
       <Tabs.Screen
@@ -28,6 +33,7 @@ export default function TabLayout() {
         options={{
           title: 'Explore',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          headerShown: false,
         }}
       />
     </Tabs>

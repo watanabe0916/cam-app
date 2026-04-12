@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourname.camapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -37,6 +38,21 @@
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "このアプリはカメラ機能を使用するためカメラへのアクセス許可が必要です。",
+          "enableMicrophonePermission": true,
+          "microphonePermissionText": "動画撮影時に音声を録音するため、マイクへのアクセス許可が必要です。"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "このアプリは撮影した写真をアルバムに保存するため、写真ライブラリへのアクセス許可が必要です。",
+          "savePhotosPermission": "このアプリは撮影した写真をアルバムに保存するため、写真ライブラリへの書き込み許可が必要です。"
         }
       ]
     ],

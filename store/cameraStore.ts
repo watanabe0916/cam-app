@@ -1,0 +1,112 @@
+import { create } from 'zustand';
+import { createJSONStorage, persist, StateStorage } from 'zustand/middleware';
+
+// MMKV のインスタンスを遅延初期化（実行時に初期化）
+let storageInstance: any = null;
+
+const getStorage = () => {
+  if (!storageInstance) {
+    try {
+      // 実行時に動的にロード
+      const { MMKV } = require('react-native-mmkv');
+      storageInstance = new MMKV();
+    } catch (error) {
+      console.warn('MMKV initialization failed:', error);
+      // フォールバック: メモリストレージ
+      storageInstance = {};
+    }
+  }
+  return storageInstance;
+};
+
+const zustandStorage: StateStorage = {
+  setItem: (name, value) => {
+    const storage = getStorage();
+    if (storage.set) {
+      return storage.set(name, value);
+    }
+    storage[name] = value;
+    return true;
+  },
+  getItem: (name) => {
+    const storage = getStorage();
+    if (storage.getString) {
+      const value = storage.getString(name);
+      return value ?? null;
+    }
+    return storage[name] ?? null;
+  },
+  removeItem: (name) => {
+    const storage = getStorage();
+    if (storage.delete) {
+      return storage.delete(name);
+    }
+    delete storage[name];
+    return true;
+  },
+};
+
+export type FlashMode = 'auto' | 'on' | 'off';
+export type AspectRatio = '4:3' | '16:9' | '1:1';
+
+export interface CameraState {
+  // モード管理
+  isPhotoMode: boolean;
+  setPhotoMode: (isPhotoMode: boolean) => void;
+
+  // 動画録画状態
+  isRecording: boolean;
+  setRecording: (isRecording: boolean) => void;
+
+  // 音声有効フラグ
+  isAudioEnabled: boolean;
+  setAudioEnabled: (isAudioEnabled: boolean) => void;
+
+  // 最後に保存された動画パス
+  lastVideoPath: string | null;
+  setLastVideoPath: (path: string | null) => void;
+
+  // 最後に保存された写真パス
+  lastPhotoPath: string | null;
+  setLastPhotoPath: (path: string | null) => void;
+
+  // フラッシュモード
+  flashMode: FlashMode;
+  setFlashMode: (mode: FlashMode) => void;
+
+  // アスペクト比
+  aspectRatio: AspectRatio;
+  setAspectRatio: (ratio: AspectRatio) => void;
+}
+
+export const useCameraStore = create<CameraState>()(
+  persist(
+    (set) => ({
+      // デフォルト: 写真モード
+      isPhotoMode: true,
+      setPhotoMode: (isPhotoMode: boolean) => set({ isPhotoMode }),
+
+      isRecording: false,
+      setRecording: (isRecording: boolean) => set({ isRecording }),
+
+      isAudioEnabled: false,
+      setAudioEnabled: (isAudioEnabled: boolean) => set({ isAudioEnabled }),
+
+      lastVideoPath: null,
+      setLastVideoPath: (path: string | null) => set({ lastVideoPath: path }),
+
+      lastPhotoPath: null,
+      setLastPhotoPath: (path: string | null) => set({ lastPhotoPath: path }),
+
+      flashMode: 'auto',
+      setFlashMode: (mode: FlashMode) => set({ flashMode: mode }),
+
+      aspectRatio: '16:9',
+      setAspectRatio: (ratio: AspectRatio) => set({ aspectRatio: ratio }),
+    }),
+    {
+      name: 'camera-store',
+      storage: createJSONStorage(() => zustandStorage),
+    }
+  )
+);
