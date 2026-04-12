@@ -4,19 +4,19 @@ import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useRef } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-    Camera,
-    useCameraDevice,
-    useCameraPermission
+  Camera,
+  useCameraDevice,
+  useCameraPermission
 } from 'react-native-vision-camera';
 
 const FLASH_MODES: FlashMode[] = ['auto', 'on', 'off'];
@@ -228,7 +228,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
         audio={!isPhotoMode && isAudioEnabled}
       />
 
-      <SafeAreaView style={styles.safeAreaContainer}>
+      <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
         <View style={styles.headerContainer}>
           <TouchableOpacity
             style={styles.headerButton}
@@ -268,8 +268,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
             ))}
           </View>
 
-          <View style={styles.headerButton} />
-        </View>
+          </View>
 
         <View style={{ flex: 1 }} />
 
@@ -303,7 +302,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
               onPress={handleGalleryPress}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="image-plus" size={24} color="#fff" />
+              <MaterialCommunityIcons name="image-plus" size={22} color="#fff" />
             </TouchableOpacity>
 
             {isPhotoMode ? (
@@ -341,7 +340,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
               onPress={handleSettingsPress}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="cog" size={24} color="#fff" />
+              <MaterialCommunityIcons name="cog" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
@@ -359,9 +358,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
+    paddingTop: 8,
   },
   headerButton: {
     width: 44,
@@ -387,18 +384,15 @@ const styles = StyleSheet.create({
     borderColor: '#007AFF',
   },
   footerContainer: {
-    gap: 16,
+    gap: 6,
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    paddingTop: 6,
+    paddingBottom: 0,
   },
-  modeTabContainer: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginBottom: 12 },
+  modeTabContainer: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginBottom: 4 },
   modeTab: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderWidth: 1,
@@ -409,12 +403,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingVertical: 8,
+    paddingBottom: 12,
   },
   galleryButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -422,9 +417,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   shutterButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -434,9 +429,9 @@ const styles = StyleSheet.create({
   shutterButtonPressed: { backgroundColor: 'rgba(255, 255, 255, 0.5)' },
   shutterButtonDisabled: { opacity: 0.6 },
   shutterButtonInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#fff',
   },
   recordButtonRecording: {
@@ -445,9 +440,9 @@ const styles = StyleSheet.create({
   },
   recordButtonText: { fontSize: 28, color: '#fff', fontWeight: 'bold' },
   settingsButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
