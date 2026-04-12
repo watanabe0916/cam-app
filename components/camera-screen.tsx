@@ -1,18 +1,18 @@
 import { useCameraStore, type AspectRatio, type FlashMode } from '@/store/cameraStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useIsFocused } from '@react-navigation/native';
+import { manipulateAsync } from 'expo-image-manipulator';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  AppState,
+  Image,
   Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -78,18 +78,21 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     setAspectRatio,
   } = useCameraStore();
   
-  // アスペクト比に対応するカメラフォーマットを取得
+  // 【要件1】動的なカメラフォーマット選択
+  // aspectRatio に応じてフォーマット条件を動的に作成
   const format = useCameraFormat(device, [
-    { videoResolution: 'max' },
+    {
+      videoAspectRatio: aspectRatio === '16:9' ? 16 / 9 : 4 / 3,
+      photoAspectRatio: aspectRatio === '16:9' ? 16 / 9 : 4 / 3,
+      videoResolution: 'max',
+      photoResolution: 'max',
+    },
   ]);
 
   const [isProcessing, setIsProcessing] = React.useState(false);
-  // 【エコ設定】アプリのバックグラウンド状態を管理
-  const [isAppForeground, setIsAppForeground] = React.useState(true);
-  // 【エコ設定】カメラ画面のフォーカス状態を取得
-  const isFocused = useIsFocused();
-  // 【エコ設定】カメラ有効判定：フォアグラウンド かつ フォーカス中
-  const isCameraActive = isAppForeground && isFocused;
+  // 【重要】カメラプレビューは常に表示（isActive を true に固定）
+  // エコ設定（バックグラウンド検出）は後続タスクで実装
+  const isCameraActive = true;
 
   const handleFlashToggle = useCallback(() => {
     // フロントカメラではフラッシュトグルをスキップ
@@ -132,18 +135,76 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     }
   }, [mediaLibraryPermission, requestMediaLibraryPermission]);
 
-  // 【エコ設定】アプリのバックグラウンド状態をリッスン
-  React.useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      setIsAppForeground(state === 'active');
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
+  // TODO: エコ設定（バックグラウンド検出）は後続タスクで実装
+  // React.useEffect(() => {
+  //   const subscription = AppState.addEventListener('change', (state) => {
+  //     setIsAppForeground(state === 'active');
+  //   });
+  //   return () => {
+  //     subscription.remove();
+  //   };
+  // }, []);
 
   // Vision Camera v4では autofocusはデフォルトで有効です
+
+  // 【要件4】1:1撮影時の画像クロップ処理（中央から正方形に切り取る）
+  const cropImageToSquare = useCallback(async (imageUri: string): Promise<string> => {
+    try {
+      // 1. 画像サイズを取得
+      const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        // @ts-ignore Image の型定義
+        if (!Image || !Image.getSize) {
+          console.warn('⚠️ Image.getSize not available, using fallback');
+          // フォールバック：一般的な 4:3 のサイズを想定
+          resolve({ width: 1080, height: 1440 });
+          return;
+        }
+
+        // @ts-ignore
+        Image.getSize(
+          imageUri,
+          (w: number, h: number) => {
+            console.log(`📐 Image size: ${w}x${h}`);
+            resolve({ width: w, height: h });
+          },
+          (error: any) => {
+            console.warn(`⚠️ Could not get image size: ${error}, using fallback`);
+            // エラー時は 4:3 比率を想定
+            resolve({ width: 1080, height: 1440 });
+          }
+        );
+      });
+
+      // 2. 最小辺を基準に正方形サイズを決定
+      const squareSize = Math.min(size.width, size.height);
+      const originX = (size.width - squareSize) / 2;
+      const originY = (size.height - squareSize) / 2;
+
+      console.log(`🔳 Cropping: ${size.width}x${size.height} -> ${squareSize}x${squareSize}`);
+
+      // 3. クロップを実行
+      const result = await manipulateAsync(
+        imageUri,
+        [
+          {
+            crop: {
+              originX: Math.round(originX),
+              originY: Math.round(originY),
+              width: Math.round(squareSize),
+              height: Math.round(squareSize),
+            },
+          },
+        ],
+        { compress: 1 }
+      );
+
+      console.log(`✅ Crop completed`);
+      return result.uri;
+    } catch (error) {
+      console.error('❌ Crop failed:', error);
+      return imageUri;
+    }
+  }, []);
 
   const handleTakePhoto = useCallback(async () => {
     if (!cameraRef.current || isRecording) return;
@@ -171,22 +232,30 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       // 【重要】無音撮影のため takeSnapshot() を使用
       // iOS では video パイプラインからフレームをキャプチャするため、video=true が必須
       // （takePhoto() はシステムシャッター音を出すため使用禁止）
-      const snapshot = await cameraRef.current.takeSnapshot({
+      let snapshotUri = (await cameraRef.current.takeSnapshot({
         quality: 100,
-      });
+      }))?.path;
 
-      if (!snapshot) {
+      if (!snapshotUri) {
         console.warn('⚠️ Snapshot returned null');
         Alert.alert('エラー', 'スナップショット取得に失敗しました。カメラをリセットして再度お試しください');
         return;
       }
 
-      // スナップショットをメディアライブラリに保存
-      const asset = await MediaLibrary.createAssetAsync(snapshot.path);
+      // 【要件4】1:1 選択時のみクロップ処理を実行
+      if (aspectRatio === '1:1') {
+        console.log('🔳 1:1 aspect ratio detected - applying crop...');
+        snapshotUri = await cropImageToSquare(snapshotUri);
+      } else {
+        console.log(`📸 Snapshot captured with ${aspectRatio} aspect ratio`);
+      }
+
+      // クロップ済み（または元の）画像をメディアライブラリに保存
+      const asset = await MediaLibrary.createAssetAsync(snapshotUri);
       await MediaLibrary.addAssetsToAlbumAsync([asset], 'Camera');
 
-      setLastPhotoPath(snapshot.path);
-      onPhotoCapture?.(snapshot.path);
+      setLastPhotoPath(snapshotUri);
+      onPhotoCapture?.(snapshotUri);
 
       Alert.alert('成功', '写真が保存されました');
     } catch (error) {
@@ -197,7 +266,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [isRecording, device, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission]);
+  }, [isRecording, device, aspectRatio, cropImageToSquare, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission]);
 
   const handleStartRecording = useCallback(async () => {
     if (!cameraRef.current || !device) return;
@@ -268,33 +337,35 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: '#000' }]}>
-      {/* 【アスペクト比制御】指定されたアスペクト比でカメラプレビューをクロップ */}
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          {
-            justifyContent: 'center',
-            alignItems: 'center',
-            overflow: 'hidden',
-            aspectRatio: ASPECT_RATIO_VALUES[aspectRatio],
-          },
-        ]}
-      >
-        {/* 【エコ設定】カメラはフォアグラウンド＆フォーカス時のみ有効化 */}
-        <Camera
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          device={device}
-          isActive={isCameraActive}
-          photo={isPhotoMode}
-          video={true}
-          audio={!isPhotoMode && isAudioEnabled}
-          format={format}
-        />
+    <View style={styles.container}>
+      {/* 【レイヤー1】カメラプレビュー - 背景層 */}
+      <View style={styles.cameraPreviewContainer}>
+        {/* 【要件2】UI動的リサイズ - アスペクト比制御＆マスキング */}
+        <View
+          style={[
+            styles.cameraAspectRatioWrapper,
+            {
+              aspectRatio: ASPECT_RATIO_VALUES[aspectRatio],
+            },
+          ]}
+        >
+          {/* 【エコ設定】カメラはフォアグラウンド＆フォーカス時のみ有効化 */}
+          <Camera
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            device={device}
+            isActive={isCameraActive}
+            photo={isPhotoMode}
+            video={true}
+            audio={!isPhotoMode && isAudioEnabled}
+            format={format}
+            pixelFormat="yuv"
+          />
+        </View>
       </View>
 
-      <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
+      {/* 【レイヤー2】UI層 - 前景層（カメラの上に重ねる） */}
+      <SafeAreaView style={styles.uiOverlay} edges={['top']}>
         <View style={styles.headerContainer}>
           <TouchableOpacity
             style={[styles.headerButton, isFrontCamera && {opacity: 0.3}]}
@@ -423,8 +494,29 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  safeAreaContainer: { flex: 1, justifyContent: 'space-between' },
+  container: { flex: 1, backgroundColor: '#000' },
+  // 【要件2】【要件3】カメラプレビュー領域 - 画面全体を覆う
+  cameraPreviewContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
+  },
+  // 【要件2】アスペクト比ラッパー - 動的にリサイズ＆マスキング
+  cameraAspectRatioWrapper: {
+    overflow: 'hidden',
+    width: '100%',
+  },
+  uiOverlay: {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'space-between',
+  },
   headerContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
