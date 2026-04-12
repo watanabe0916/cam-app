@@ -1,5 +1,6 @@
 import { useCameraStore, type AspectRatio, type FlashMode } from '@/store/cameraStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { manipulateAsync } from 'expo-image-manipulator';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
@@ -7,12 +8,14 @@ import React, { useCallback, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  type AppStateStatus
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -55,7 +58,10 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   onVideoRecorded,
 }) => {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const cameraRef = useRef<Camera>(null);
+  const [latestAsset, setLatestAsset] = React.useState<MediaLibrary.Asset | null>(null);
+  const [appState, setAppState] = React.useState<AppStateStatus>(AppState.currentState);
   // カメラの選択状態を管理（フロント/バック）
   const [isFrontCamera, setIsFrontCamera] = React.useState(false);
   // 選択されたカメラデバイスを取得
@@ -101,9 +107,8 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   }, [device, format, isFrontCamera]);
 
   const [isProcessing, setIsProcessing] = React.useState(false);
-  // 【重要】カメラプレビューは常に表示（isActive を true に固定）
-  // エコ設定（バックグラウンド検出）は後続タスクで実装
-  const isCameraActive = true;
+  const isAppForeground = appState === 'active';
+  const isCameraActive = isAppForeground && isFocused;
 
   const handleFlashToggle = useCallback(() => {
     // フロントカメラではフラッシュトグルをスキップ
@@ -123,16 +128,36 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     setAspectRatio(ratio);
   }, [setAspectRatio]);
 
-  const handleGalleryPress = useCallback(() => {
-    router.push('/gallery');
-  }, [router]);
-
   const handleSettingsPress = useCallback(() => {
     router.push('/settings');
   }, [router]);
 
   // MediaLibrary パーミッション管理
   const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions();
+
+  const loadLatestAsset = useCallback(async () => {
+    try {
+      if (mediaLibraryPermission?.granted === false) {
+        setLatestAsset(null);
+        return;
+      }
+
+      const result = await MediaLibrary.getAssetsAsync({
+        mediaType: ['photo', 'video'],
+        sortBy: [['creationTime', false]],
+        first: 1,
+      });
+
+      setLatestAsset(result.assets[0] ?? null);
+    } catch (error) {
+      console.warn('⚠️ Failed to load latest asset thumbnail:', error);
+      setLatestAsset(null);
+    }
+  }, [mediaLibraryPermission]);
+
+  const handleGalleryPress = useCallback(() => {
+    router.push('/gallery');
+  }, [router]);
 
   React.useEffect(() => {
     if (!cameraPermission) {
@@ -146,15 +171,42 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     }
   }, [mediaLibraryPermission, requestMediaLibraryPermission]);
 
-  // TODO: エコ設定（バックグラウンド検出）は後続タスクで実装
-  // React.useEffect(() => {
-  //   const subscription = AppState.addEventListener('change', (state) => {
-  //     setIsAppForeground(state === 'active');
-  //   });
-  //   return () => {
-  //     subscription.remove();
-  //   };
-  // }, []);
+  React.useEffect(() => {
+    if (mediaLibraryPermission?.granted) {
+      loadLatestAsset();
+    }
+  }, [mediaLibraryPermission, loadLatestAsset]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadLatestAsset();
+    }, [loadLatestAsset])
+  );
+
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      setAppState(nextState);
+      const nextCameraActive = nextState === 'active' && isFocused;
+
+      console.log(
+        `[CameraLifecycle] AppState changed: ${nextState}, focused: ${isFocused}, cameraActive: ${nextCameraActive}`
+      );
+
+      if (nextState !== 'active') {
+        console.log('[CameraLifecycle] Home/background detected. Camera should be OFF.');
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isFocused]);
+
+  React.useEffect(() => {
+    console.log(
+      `[CameraLifecycle] cameraActive=${isCameraActive} (appState=${appState}, focused=${isFocused})`
+    );
+  }, [isCameraActive, appState, isFocused]);
 
   // Vision Camera v4では autofocusはデフォルトで有効です
 
@@ -261,9 +313,10 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
         console.log(`📸 Snapshot captured with ${aspectRatio} aspect ratio`);
       }
 
-      // クロップ済み（または元の）画像をメディアライブラリに保存
-      const asset = await MediaLibrary.createAssetAsync(snapshotUri);
-      await MediaLibrary.addAssetsToAlbumAsync([asset], 'Camera');
+      // クロップ済み（または元の）画像をデフォルトカメラロールに保存
+      // 【重要】saveToLibraryAsync() は自動的にデフォルトの写真アプリと同期される
+      await MediaLibrary.saveToLibraryAsync(snapshotUri);
+      await loadLatestAsset();
 
       setLastPhotoPath(snapshotUri);
       onPhotoCapture?.(snapshotUri);
@@ -277,7 +330,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [isRecording, device, aspectRatio, cropImageToSquare, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission]);
+  }, [isRecording, device, aspectRatio, cropImageToSquare, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission, loadLatestAsset]);
 
   const handleStartRecording = useCallback(async () => {
     if (!cameraRef.current || !device) return;
@@ -297,14 +350,22 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       setRecording(true);
       cameraRef.current.startRecording({
         onRecordingFinished: async (video) => {
-          const asset = await MediaLibrary.createAssetAsync(video.path);
-          await MediaLibrary.addAssetsToAlbumAsync([asset], 'Camera');
+          try {
+            // 動画をデフォルトカメラロールに保存
+            // 【重要】saveToLibraryAsync() は自動的にデフォルトの写真アプリと同期される
+            await MediaLibrary.saveToLibraryAsync(video.path);
+            await loadLatestAsset();
 
-          setLastVideoPath(video.path);
-          onVideoRecorded?.(video.path);
+            setLastVideoPath(video.path);
+            onVideoRecorded?.(video.path);
 
-          setRecording(false);
-          Alert.alert('成功', '動画が保存されました');
+            setRecording(false);
+            Alert.alert('成功', '動画が保存されました');
+          } catch (error) {
+            console.error('Failed to save video to library:', error);
+            setRecording(false);
+            Alert.alert('エラー', '動画の保存に失敗しました');
+          }
         },
         onRecordingError: (error) => {
           console.error('Recording error:', error);
@@ -317,7 +378,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       setRecording(false);
       Alert.alert('エラー', '動画の録画開始に失敗しました');
     }
-  }, [device, onVideoRecorded, setLastVideoPath, setRecording, mediaLibraryPermission, requestMediaLibraryPermission]);
+  }, [device, onVideoRecorded, setLastVideoPath, setRecording, mediaLibraryPermission, requestMediaLibraryPermission, loadLatestAsset]);
 
   const handleStopRecording = useCallback(async () => {
     // 録画中でない場合は処理をスキップ
@@ -457,7 +518,18 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
               onPress={handleGalleryPress}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="image-plus" size={22} color="#fff" />
+              {latestAsset ? (
+                <>
+                  <Image source={{ uri: latestAsset.uri }} style={styles.galleryThumbnail} />
+                  {latestAsset.mediaType === 'video' && (
+                    <View style={styles.galleryVideoBadge}>
+                      <MaterialCommunityIcons name="play" size={14} color="#fff" />
+                    </View>
+                  )}
+                </>
+              ) : (
+                <MaterialCommunityIcons name="image-plus" size={22} color="#fff" />
+              )}
             </TouchableOpacity>
 
             {isPhotoMode ? (
@@ -505,7 +577,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1, width: '100%', height: '100%', backgroundColor: '#000' },
   // 【要件2】【要件3】カメラプレビュー領域 - 画面全体を覆う
   cameraPreviewContainer: {
     flex: 1,
@@ -599,6 +671,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+    overflow: 'hidden',
+  },
+  galleryThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  galleryVideoBadge: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   shutterButton: {
     width: 64,
