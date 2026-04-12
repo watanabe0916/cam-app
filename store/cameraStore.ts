@@ -1,22 +1,33 @@
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { createMMKV } from 'react-native-mmkv';
 import { create } from 'zustand';
 import { createJSONStorage, persist, StateStorage } from 'zustand/middleware';
 
+// VS Code の自動削除を防ぐためのダミー変数代入
+const _keepCreateMMKV = createMMKV;
+
 // MMKV のインスタンスを遅延初期化（実行時に初期化）
 let storageInstance: any = null;
+let initializationAttempted = false;
 
 const getStorage = () => {
-  if (!storageInstance) {
+  if (!storageInstance && !initializationAttempted) {
+    initializationAttempted = true;
     try {
-      // 実行時に動的にロード
-      const { MMKV } = require('react-native-mmkv');
-      storageInstance = new MMKV();
+      // 標準的な静的インポートから MMKV を初期化
+      const instance = _keepCreateMMKV();
+      if (!instance) {
+        throw new Error('createMMKV() returned undefined');
+      }
+      storageInstance = instance;
+      console.log('✅ MMKV initialized successfully:', storageInstance.id);
     } catch (error) {
-      console.warn('MMKV initialization failed:', error);
+      console.error('❌ MMKV initialization failed:', error);
       // フォールバック: メモリストレージ
       storageInstance = {};
     }
   }
-  return storageInstance;
+  return storageInstance || {};
 };
 
 const zustandStorage: StateStorage = {

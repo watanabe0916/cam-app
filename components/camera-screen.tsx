@@ -97,24 +97,40 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   const handleTakePhoto = useCallback(async () => {
     if (!cameraRef.current || isRecording) return;
 
-    // MediaLibrary パーミッション確認
-    if (mediaLibraryPermission?.granted === false) {
+    // カメラの状態確認（プレビューが準備完了しているか）
+    if (!device || !cameraRef.current) {
+      Alert.alert('エラー', 'カメラがまだ準備中です。もう一度お試しください');
+      return;
+    }
+
+    // MediaLibrary パーミッション確認（毎回チェック）
+    let currentPermission = mediaLibraryPermission;
+    if (currentPermission?.granted === false) {
       const result = await requestMediaLibraryPermission();
       if (result?.granted === false) {
         Alert.alert('エラー', 'フォトライブラリへのアクセス許可が必要です');
         return;
       }
+      currentPermission = result;
     }
 
     try {
       setIsProcessing(true);
       
-      // takeSnapshot() を使用して無音撮影（プレビューからのスナップショット取得）
+      // 【重要】無音撮影のため takeSnapshot() を使用
+      // iOS では video パイプラインからフレームをキャプチャするため、video=true が必須
+      // （takePhoto() はシステムシャッター音を出すため使用禁止）
       const snapshot = await cameraRef.current.takeSnapshot({
         quality: 100,
       });
 
-      // スナップショット パスをメディアライブラリに保存
+      if (!snapshot) {
+        console.warn('⚠️ Snapshot returned null');
+        Alert.alert('エラー', 'スナップショット取得に失敗しました。カメラをリセットして再度お試しください');
+        return;
+      }
+
+      // スナップショットをメディアライブラリに保存
       const asset = await MediaLibrary.createAssetAsync(snapshot.path);
       await MediaLibrary.addAssetsToAlbumAsync([asset], 'Camera');
 
@@ -123,23 +139,27 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
 
       Alert.alert('成功', '写真が保存されました');
     } catch (error) {
-      console.error('Failed to take photo:', error);
-      Alert.alert('エラー', '写真の撮影に失敗しました');
+      console.error('❌ takeSnapshot failed:', error);
+      // takeSnapshot 失敗時の詳細なエラーメッセージ
+      const errorMessage = error instanceof Error ? error.message : '不明なエラー';
+      Alert.alert('エラー', `スナップショット撮影に失敗しました: ${errorMessage}`);
     } finally {
       setIsProcessing(false);
     }
-  }, [isRecording, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission]);
+  }, [isRecording, device, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission]);
 
   const handleStartRecording = useCallback(async () => {
     if (!cameraRef.current || !device) return;
 
-    // MediaLibrary パーミッション確認
-    if (mediaLibraryPermission?.granted === false) {
+    // MediaLibrary パーミッション確認（毎回チェック）
+    let currentPermission = mediaLibraryPermission;
+    if (currentPermission?.granted === false) {
       const result = await requestMediaLibraryPermission();
       if (result?.granted === false) {
         Alert.alert('エラー', 'フォトライブラリへのアクセス許可が必要です');
         return;
       }
+      currentPermission = result;
     }
 
     try {
@@ -204,7 +224,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
         device={device}
         isActive={true}
         photo={isPhotoMode}
-        video={!isPhotoMode}
+        video={true}
         audio={!isPhotoMode && isAudioEnabled}
       />
 
