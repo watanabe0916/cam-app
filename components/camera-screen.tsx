@@ -108,21 +108,18 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
 
     try {
       setIsProcessing(true);
-      const flashModeMap: Record<FlashMode, 'on' | 'off'> = {
-        'auto': 'off',
-        'on': 'on',
-        'off': 'off',
-      };
-
-      const photo = await cameraRef.current.takePhoto({
-        flash: flashModeMap[flashMode],
+      
+      // takeSnapshot() を使用して無音撮影（プレビューからのスナップショット取得）
+      const snapshot = await cameraRef.current.takeSnapshot({
+        quality: 100,
       });
 
-      const asset = await MediaLibrary.createAssetAsync(photo.path);
+      // スナップショット パスをメディアライブラリに保存
+      const asset = await MediaLibrary.createAssetAsync(snapshot.path);
       await MediaLibrary.addAssetsToAlbumAsync([asset], 'Camera');
 
-      setLastPhotoPath(photo.path);
-      onPhotoCapture?.(photo.path);
+      setLastPhotoPath(snapshot.path);
+      onPhotoCapture?.(snapshot.path);
 
       Alert.alert('成功', '写真が保存されました');
     } catch (error) {
@@ -131,7 +128,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [isRecording, flashMode, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission]);
+  }, [isRecording, onPhotoCapture, setLastPhotoPath, mediaLibraryPermission, requestMediaLibraryPermission]);
 
   const handleStartRecording = useCallback(async () => {
     if (!cameraRef.current || !device) return;
