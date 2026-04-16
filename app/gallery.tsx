@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 
 type GalleryViewMode = 'grid' | 'detail';
+const PAGE_SIZE = 80;
 
 // Animated コンポーネント化
 const AnimatedView = Animated.createAnimatedComponent(View);
@@ -33,6 +34,9 @@ export default function GalleryScreen() {
 
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasNextPage, setHasNextPage] = useState(true);
+  const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [permission, requestPermission] = MediaLibrary.usePermissions();
   const [viewMode, setViewMode] = useState<GalleryViewMode>('grid');
   const [selectedAsset, setSelectedAsset] = useState<MediaLibrary.Asset | null>(null);
@@ -47,33 +51,89 @@ export default function GalleryScreen() {
   const hasInitializedByParams = useRef(false);
   const openFromCameraThumbnailRef = useRef(false);
 
-  // ギャラリーから写真と動画を取得
+  const ensureMediaLibraryPermission = useCallback(async () => {
+    if (permission?.granted === false) {
+      const result = await requestPermission();
+      if (result?.granted === false) {
+        console.warn('⚠️ Media library permission denied');
+        return false;
+      }
+    }
+
+    return true;
+  }, [permission, requestPermission]);
+
+  // ギャラリーから写真と動画を取得（初回ページ）
   const loadAssets = useCallback(async () => {
+    setIsLoading(true);
+
     try {
-      if (permission?.granted === false) {
-        const result = await requestPermission();
-        if (result?.granted === false) {
-          console.warn('⚠️ Media library permission denied');
-          setIsLoading(false);
-          return;
-        }
+      const hasPermission = await ensureMediaLibraryPermission();
+      if (!hasPermission) {
+        return;
       }
 
-      // カメラロールから全写真と動画を取得（最新順）
       const result = await MediaLibrary.getAssetsAsync({
         mediaType: ['photo', 'video'],
-        sortBy: [['creationTime', false]], // 最新順
-        first: 100, // 最大100件取得
+        sortBy: [['creationTime', false]],
+        first: PAGE_SIZE,
       });
 
-      console.log(`📸 Loaded ${result.assets.length} assets from camera roll`);
+      console.log(`📸 Loaded first page: ${result.assets.length} assets`);
       setAssets(result.assets);
+      setEndCursor(result.endCursor ?? undefined);
+      setHasNextPage(result.hasNextPage);
     } catch (error) {
       console.error('❌ Failed to load assets:', error);
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
     }
-  }, [permission, requestPermission]);
+  }, [ensureMediaLibraryPermission]);
+
+  // グリッド末尾到達時に追加ページを取得
+  const loadMoreAssets = useCallback(async () => {
+    if (isLoading || isLoadingMore || !hasNextPage || !endCursor) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+
+    try {
+      const hasPermission = await ensureMediaLibraryPermission();
+      if (!hasPermission) {
+        return;
+      }
+
+      const result = await MediaLibrary.getAssetsAsync({
+        mediaType: ['photo', 'video'],
+        sortBy: [['creationTime', false]],
+        first: PAGE_SIZE,
+        after: endCursor,
+      });
+
+      setAssets((prev) => {
+        const existingIds = new Set(prev.map((asset) => asset.id));
+        const next = [...prev];
+
+        for (const asset of result.assets) {
+          if (!existingIds.has(asset.id)) {
+            existingIds.add(asset.id);
+            next.push(asset);
+          }
+        }
+
+        return next;
+      });
+
+      setEndCursor(result.endCursor ?? undefined);
+      setHasNextPage(result.hasNextPage);
+    } catch (error) {
+      console.error('❌ Failed to load more assets:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoading, isLoadingMore, hasNextPage, endCursor, ensureMediaLibraryPermission]);
 
   useEffect(() => {
     loadAssets();
@@ -174,7 +234,6 @@ export default function GalleryScreen() {
 
   // アセットをリフレッシュ（プルダウン更新）
   const handleRefresh = useCallback(async () => {
-    setIsLoading(true);
     await loadAssets();
   }, [loadAssets]);
 
@@ -497,6 +556,15 @@ export default function GalleryScreen() {
             columnWrapperStyle={styles.row}
             refreshing={isLoading}
             onRefresh={handleRefresh}
+            onEndReached={loadMoreAssets}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              isLoadingMore ? (
+                <View style={styles.loadMoreContainer}>
+                  <ActivityIndicator size="small" color="#007AFF" />
+                </View>
+              ) : null
+            }
             contentContainerStyle={styles.gridContainer}
           />
         </View>
@@ -527,6 +595,8 @@ export default function GalleryScreen() {
             columnWrapperStyle={styles.row}
             refreshing={isLoading}
             onRefresh={handleRefresh}
+            onEndReached={loadMoreAssets}
+            onEndReachedThreshold={0.5}
             contentContainerStyle={styles.gridContainer}
           />
         </View>
@@ -627,6 +697,10 @@ const styles = StyleSheet.create({
   },
   gridContainer: {
     paddingBottom: 0,
+  },
+  loadMoreContainer: {
+    paddingVertical: 16,
+    alignItems: 'center',
   },
   row: {
     justifyContent: 'space-between',
