@@ -162,14 +162,6 @@ npx expo start
 npx tsc --noEmit
 ```
 
-### ズームが反応しない
-
-以下を確認します。
-
-- ルートが GestureHandlerRootView 配下になっている
-- Camera オーバーレイの pointerEvents がジェスチャーを阻害していない
-- 実機で検証している
-
 ## 補足
 
 本 README は、現時点の実装状態を基準に記載しています。  
