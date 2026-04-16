@@ -17,6 +17,7 @@ import {
   View,
   type AppStateStatus
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Camera,
@@ -48,6 +49,10 @@ const FLASH_ICONS = {
   off: 'flash-off',
 } as const;
 
+const clamp = (value: number, min: number, max: number) => {
+  return Math.min(Math.max(value, min), max);
+};
+
 export interface CameraScreenProps {
   onPhotoCapture?: (photoPath: string) => void;
   onVideoRecorded?: (videoPath: string) => void;
@@ -66,6 +71,8 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   const [isFrontCamera, setIsFrontCamera] = React.useState(false);
   // 選択されたカメラデバイスを取得
   const device = useCameraDevice(isFrontCamera ? 'front' : 'back');
+  const [zoom, setZoom] = React.useState(1);
+  const pinchStartZoomRef = useRef(1);
   
   const { hasPermission: cameraPermission, requestPermission: requestCameraPermission } =
     useCameraPermission();
@@ -109,6 +116,51 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   const [isProcessing, setIsProcessing] = React.useState(false);
   const isAppForeground = appState === 'active';
   const isCameraActive = isAppForeground && isFocused;
+
+  const minZoom = device?.minZoom ?? 1;
+  const neutralZoom = device?.neutralZoom ?? minZoom;
+  const maxZoom = React.useMemo(() => {
+    if (!device) {
+      return 1;
+    }
+
+    const practicalMax = neutralZoom * 5;
+    const deviceMax = device.maxZoom ?? practicalMax;
+
+    return Math.max(minZoom, Math.min(deviceMax, practicalMax));
+  }, [device, minZoom, neutralZoom]);
+
+  React.useEffect(() => {
+    if (!device) {
+      return;
+    }
+
+    const initialZoom = clamp(neutralZoom, minZoom, maxZoom);
+    setZoom(initialZoom);
+    pinchStartZoomRef.current = initialZoom;
+  }, [device, minZoom, neutralZoom, maxZoom]);
+
+  const pinchGesture = React.useMemo(
+    () =>
+      Gesture.Pinch()
+        .runOnJS(true)
+        .onBegin(() => {
+          pinchStartZoomRef.current = zoom;
+        })
+        .onUpdate((event) => {
+          const nextZoom = clamp(
+            pinchStartZoomRef.current * event.scale,
+            minZoom,
+            maxZoom
+          );
+
+          setZoom((prev) => (Math.abs(prev - nextZoom) < 0.001 ? prev : nextZoom));
+        })
+        .onEnd(() => {
+          pinchStartZoomRef.current = zoom;
+        }),
+    [zoom, minZoom, maxZoom]
+  );
 
   const handleFlashToggle = useCallback(() => {
     // フロントカメラではフラッシュトグルをスキップ
@@ -412,33 +464,38 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     <View style={styles.container}>
       {/* 【レイヤー1】カメラプレビュー - 背景層 */}
       <View style={styles.cameraPreviewContainer}>
-        {/* 【要件2】UI動的リサイズ - アスペクト比制御＆マスキング */}
-        <View
-          style={[
-            styles.cameraAspectRatioWrapper,
-            {
-              aspectRatio: ASPECT_RATIO_VALUES[aspectRatio],
-            },
-          ]}
-        >
-          {/* 【エコ設定】カメラはフォアグラウンド＆フォーカス時のみ有効化 */}
-          <Camera
-            ref={cameraRef}
-            style={StyleSheet.absoluteFill}
-            device={device}
-            isActive={isCameraActive}
-            photo={isPhotoMode}
-            video={true}
-            audio={!isPhotoMode && isAudioEnabled}
-            format={format}
-            pixelFormat="yuv"
-          />
-        </View>
+        <GestureDetector gesture={pinchGesture}>
+          <View style={styles.pinchGestureWrapper}>
+            {/* 【要件2】UI動的リサイズ - アスペクト比制御＆マスキング */}
+            <View
+              style={[
+                styles.cameraAspectRatioWrapper,
+                {
+                  aspectRatio: ASPECT_RATIO_VALUES[aspectRatio],
+                },
+              ]}
+            >
+              {/* 【エコ設定】カメラはフォアグラウンド＆フォーカス時のみ有効化 */}
+              <Camera
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                device={device}
+                isActive={isCameraActive}
+                photo={isPhotoMode}
+                video={true}
+                audio={!isPhotoMode && isAudioEnabled}
+                format={format}
+                pixelFormat="yuv"
+                zoom={zoom}
+              />
+            </View>
+          </View>
+        </GestureDetector>
       </View>
 
       {/* 【レイヤー2】UI層 - 前景層（カメラの上に重ねる） */}
-      <SafeAreaView style={styles.uiOverlay} edges={['top']}>
-        <View style={styles.headerContainer}>
+      <SafeAreaView style={styles.uiOverlay} edges={['top']} pointerEvents="box-none">
+        <View style={styles.headerContainer} pointerEvents="box-none">
           <TouchableOpacity
             style={[styles.headerButton, isFrontCamera && {opacity: 0.3}]}
             onPress={handleFlashToggle}
@@ -486,9 +543,9 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
           </TouchableOpacity>
         </View>
 
-        <View style={{ flex: 1 }} />
+        <View style={{ flex: 1 }} pointerEvents="none" />
 
-        <View style={styles.footerContainer}>
+        <View style={styles.footerContainer} pointerEvents="box-none">
           <View style={styles.modeTabContainer}>
             <Pressable
               style={[styles.modeTab, isPhotoMode && styles.modeTabActive]}
@@ -588,6 +645,11 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   // 【要件2】アスペクト比ラッパー - 動的にリサイズ＆マスキング
+  pinchGestureWrapper: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+  },
   cameraAspectRatioWrapper: {
     overflow: 'hidden',
     width: '100%',
