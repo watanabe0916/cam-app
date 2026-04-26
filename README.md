@@ -1,9 +1,11 @@
 # cam-app
 
-無音撮影を中心に設計した、iOS 向けカメラアプリです。  
+授業中や夜中でも気軽に利用できる無音撮影を中心に設計した、iOS 向けカメラアプリです。  
 Expo Router をベースに、react-native-vision-camera、Zustand、MMKV、expo-media-library を組み合わせて実装しています。
 
 ## 概要
+
+![アプリプレビュー](IMG_0989.PNG)
 
 このプロジェクトは、以下の実運用要件を満たすことを目的にしています。
 
@@ -94,6 +96,7 @@ Expo Router をベースに、react-native-vision-camera、Zustand、MMKV、expo
 
 - macOS
 - Xcode（iOS SDK 含む）
+- iPhone 実機（App Store 未公開のため）
 - Node.js 18 以上
 - npm
 - CocoaPods
@@ -124,6 +127,9 @@ npx expo start
 ```
 
 ## iOS 実機ビルドが必要な理由
+
+本アプリは App Store 未公開の開発版です。  
+そのため、インストールと検証は Xcode 経由の開発ビルド（実機）を前提としています。
 
 このアプリは、以下のネイティブ依存を使うため、実機検証が前提です。
 
